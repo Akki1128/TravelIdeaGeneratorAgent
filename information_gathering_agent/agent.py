@@ -1,13 +1,13 @@
 import os
 from typing import Dict, Any, Optional
-from google.adk.agents import Agent
-from google.genai import types # Good practice to keep
-from dotenv import load_dotenv
+from google.adk.agents import Agent # type: ignore
+from google.genai import types  # type: ignore
+from dotenv import load_dotenv # type: ignore
 
 # Load environment variables from the root .env file
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-# --- Tool for Information Gathering Agent to Signal Completion ---
+# --- Tool for Information Gathering Agent ---
 def submit_collected_info(
     destination: str,
     dates_duration: str,
@@ -37,7 +37,7 @@ def submit_collected_info(
 info_gathering_agent = None
 try:
     info_gathering_agent = Agent(
-        model="gemini-1.5-flash", # Using Gemini 1.5 Flash for efficiency
+        model="gemini-1.5-flash", 
         name="InformationGatheringAgent",
         instruction=(
             "You are the **Information Gathering Agent** for a personalized travel idea generator. "

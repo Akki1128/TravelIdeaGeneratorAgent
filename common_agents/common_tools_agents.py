@@ -1,7 +1,7 @@
 import os
 from typing import Optional
-from google.adk.agents import Agent
-from dotenv import load_dotenv
+from google.adk.agents import Agent # type: ignore
+from dotenv import load_dotenv # type: ignore
 
 # Load environment variables from the root .env file
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -32,7 +32,7 @@ print("Common Greeting and Farewell tools defined.")
 greeting_agent = None
 try:
     greeting_agent = Agent(
-        model="gemini-1.5-flash", # Using Gemini 1.5 Flash for efficiency
+        model="gemini-1.5-flash", 
         name="GreetingAgent",
         instruction=(
             "You are the Greeting Agent. Your ONLY task is to provide a friendly greeting to the user. "
@@ -50,7 +50,7 @@ except Exception as e:
 farewell_agent = None
 try:
     farewell_agent = Agent(
-        model="gemini-1.5-flash", # Using Gemini 1.5 Flash for efficiency
+        model="gemini-1.5-flash", 
         name="FarewellAgent",
         instruction=(
             "You are the Farewell Agent. Your ONLY task is to provide a polite goodbye message. "
