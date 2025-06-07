@@ -9,15 +9,11 @@ from google.adk.agents import Agent # type: ignore
 load_dotenv()
 
 if not os.getenv("GEMINI_API_KEY"):
-    print("WARNING: GEMINI_API_KEY is not set in your .env file. Agents may not initialize correctly.")
+    print("WARNING: GEMINI_API_KEY is not set in your .env file.")
 
 
 def record_travel_preference(preference_name: str, value: str, session_id: str = "default_session") -> str:
-    """Records a specific travel preference provided by the user.
-    This tool primarily serves to signal the agent that a piece of information
-    has been captured and processed.
-    """
-    print(f"DEBUG: Storing preference '{preference_name}': '{value}' for session '{session_id}'")
+
     return f"Successfully recorded {preference_name} as {value}."
 
 
@@ -38,16 +34,14 @@ try:
             "6. **Primary Interests/Activities** (e.g., 'hiking', 'museums', 'beaches', 'foodie')\n"
             "Use the `record_travel_preference` tool to store each piece of information once you receive it. "
             "Keep asking questions until all required information is gathered. "
-            "Once you have successfully called the `record_travel_preference` tool for ALL SIX required pieces of information, "
+            "Once you have successfully called the `record_travel_preference` tool for all six required pieces of information, "
             "return a brief summary of the collected information and clearly state that all necessary details have been gathered and you are now ready for the itinerary to be generated."
-            #"This signal will allow the orchestrator to proceed."
         ),
         description="Gathers essential travel preferences from the user.",
         tools=[
             record_travel_preference
         ],
     )
-    print(f"Agent '{information_gathering_agent.name}' created using model '{information_gathering_agent.model}'.")
 except Exception as e:
     print(f"Could not create Information Gathering Agent. Check GEMINI_API_KEY. Error: {e}")
     information_gathering_agent = None
@@ -72,7 +66,6 @@ try:
         description="Generates detailed travel itineraries based on collected preferences.",
         tools=[],
     )
-    print(f"Agent '{suggestion_generation_agent.name}' created using model '{suggestion_generation_agent.model}'.")
 except Exception as e:
     print(f"Could not create Suggestion Generation Agent. Check GEMINI_API_KEY. Error: {e}")
     suggestion_generation_agent = None
@@ -93,7 +86,6 @@ try:
             "   your response MUST be: 'Hello! I'm your Travel Idea Generator. I'm here to help you plan your perfect trip.' "
             "   Immediately after stating this welcome message, you MUST transfer control to the 'information_gathering_agent' to begin collecting travel details. "
             "   Do not wait for further user input after your welcome message to trigger the information gathering.\n"
-            "\n**Subsequent Interactions:**\n"
             "2. **Information Gathering:** Always prioritize delegating to the 'information_gathering_agent' to collect all necessary travel details. "
             "   Stay with this agent until all required information (Destination, Budget, Duration, Dates, Travelers, Interests) is gathered."
             "3. **Suggestion Generation:** Once the 'information_gathering_agent' indicates it has completed gathering all preferences and is ready to proceed, "
@@ -112,7 +104,6 @@ try:
             suggestion_generation_agent,
         ],
     )
-    print(f"Agent '{root_agent.name}' created using model '{root_agent.model}'.")
 except Exception as e:
     print(f"Could not create Root Orchestrator Agent. Check GEMINI_API_KEY. Error: {e}")
     root_agent = None
