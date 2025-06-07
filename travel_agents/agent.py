@@ -39,8 +39,8 @@ try:
             "Use the `record_travel_preference` tool to store each piece of information once you receive it. "
             "Keep asking questions until all required information is gathered. "
             "Once you have successfully called the `record_travel_preference` tool for ALL SIX required pieces of information, "
-            "return a brief summary of the collected information and state that you are ready for the itinerary to be generated. "
-            "This signal will allow the orchestrator to proceed."
+            "return a brief summary of the collected information and clearly state that all necessary details have been gathered and you are now ready for the itinerary to be generated."
+            #"This signal will allow the orchestrator to proceed."
         ),
         description="Gathers essential travel preferences from the user.",
         tools=[
@@ -61,9 +61,13 @@ try:
         instruction=(
             "You are the Travel Idea Generator Agent. "
             "Your task is to create a travel itinerary based on the user's provided preferences. "
-            "For Phase 1, simply acknowledge that you have received the information and would normally generate an itinerary. "
-            "Do NOT try to generate an actual itinerary yet, just confirm receipt of the preferences. "
             "Confirm that you received: Destination, Budget, Duration, Dates, Travelers, and Interests."
+            "The information you have received includes: Destination, Budget, Duration, Travel Dates, Number & Type of Travelers, and Primary Interests/Activities. "
+            "Based on these details, generate a realistic and engaging day-by-day itinerary. "
+            "For each day, suggest specific activities, attractions, or experiences that align with the user's interests. "
+            "Consider the duration and budget when planning the activities. "
+            "Present the itinerary clearly, perhaps with a brief summary at the start. "
+            "Aim for a comprehensive and helpful response that directly answers the user's need for travel ideas."
         ),
         description="Generates detailed travel itineraries based on collected preferences.",
         tools=[],
