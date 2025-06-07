@@ -108,7 +108,6 @@ try:
         description="Generates detailed, day-by-day itineraries for a chosen travel idea.",
         tools=[],
     )
-    print(f"Agent '{itinerary_generation_agent.name}' created using model '{itinerary_generation_agent.model}'.")
 except Exception as e:
     print(f"Could not create Itinerary Generation Agent. Check GEMINI_API_KEY. Error: {e}")
     itinerary_generation_agent = None
