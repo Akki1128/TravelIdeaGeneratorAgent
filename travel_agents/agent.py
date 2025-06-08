@@ -4,17 +4,46 @@ from typing import Optional
 from google.genai import types # type: ignore
 from dotenv import load_dotenv # type: ignore
 from google.adk.agents import Agent # type: ignore
-
+from datetime import datetime, timedelta
 
 load_dotenv()
 
 if not os.getenv("GEMINI_API_KEY"):
     print("WARNING: GEMINI_API_KEY is not set in your .env file.")
 
+# Load API Key and Host for Kiwi.com API
+KIWI_API_KEY = os.getenv("KIWI_API_KEY")
+RAPIDAPI_HOST = "kiwi-com-cheap-flights.p.rapidapi.com"
+
+if not KIWI_API_KEY:
+    print("WARNING: KIWI_API_KEY is not set in your .env file. Flight price API calls will fail.")
 
 def record_travel_preference(preference_name: str, value: str, session_id: str = "default_session") -> str:
 
     return f"Successfully recorded {preference_name} as {value}."
+
+def _parse_travel_dates(travel_dates_str: str) -> tuple[str, str]:
+    
+    today = datetime.now()
+    if "next month" in travel_dates_str.lower():
+        start_date = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
+        end_date = (start_date + timedelta(days=31)).replace(day=1) - timedelta(days=1)
+    elif "flexible" in travel_dates_str.lower() or "open" in travel_dates_str.lower():
+        start_date = today
+        end_date = today + timedelta(days=180)
+    elif "july 2025" in travel_dates_str.lower():
+        start_date = datetime(2025, 7, 1)
+        end_date = datetime(2025, 7, 31)
+    else:
+        try:
+            parsed_date = datetime.strptime(travel_dates_str.split(' ')[0], "%Y-%m-%d")
+            start_date = parsed_date
+            end_date = parsed_date + timedelta(days=7)
+        except ValueError:
+            start_date = today
+            end_date = today + timedelta(days=30)
+
+    return start_date.strftime("%d/%m/%Y"), end_date.strftime("%d/%m/%Y")
 
 
 information_gathering_agent = None
