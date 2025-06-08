@@ -22,7 +22,7 @@ def record_travel_preference(preference_name: str, value: str, session_id: str =
 
     return f"Successfully recorded {preference_name} as {value}."
 
-def _parse_travel_dates(travel_dates_str: str) -> tuple[str, str]:
+def parse_travel_dates(travel_dates_str: str) -> tuple[str, str]:
     
     today = datetime.now()
     if "next month" in travel_dates_str.lower():
