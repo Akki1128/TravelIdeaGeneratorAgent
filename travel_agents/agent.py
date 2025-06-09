@@ -46,6 +46,82 @@ def parse_travel_dates(travel_dates_str: str) -> tuple[str, str]:
     return start_date.strftime("%d/%m/%Y"), end_date.strftime("%d/%m/%Y")
 
 
+def get_flight_prices(origin: str, destinations: list[str], travel_dates: str) -> str:
+    
+    print(f"DEBUG: Attempting to get flight prices for origin: {origin}, destinations: {destinations}, dates: {travel_dates}")
+
+    if not KIWI_API_KEY:
+        return "Error: KIWI_API_KEY is not configured. Cannot fetch real-time flight prices."
+
+    url = "https://kiwi-com-cheap-flights.p.rapidapi.com/round-trip"
+
+    headers = {
+        "x-rapidapi-host": RAPIDAPI_HOST,
+        "x-rapidapi-key": KIWI_API_KEY
+    }
+
+    date_from, date_to = parse_travel_dates(travel_dates)
+
+    results = []
+    for dest in destinations:
+        formatted_dest = f"City%3A{dest.replace(' ', '_')}" 
+        formatted_origin = f"City%3A{origin.replace(' ', '_')}" 
+
+        querystring = {
+            "source": formatted_origin,
+            "destination": formatted_dest,
+            "date_from": date_from, 
+            "date_to": date_to,
+            "adults": "1", 
+            "children": "0",
+            "infants": "0",
+            "currency": "usd",
+            "locale": "en",
+            "sortby": "price", 
+            "limit": "1", 
+            "flight_type": "round",
+            "return_from": date_from, 
+            "return_to": date_to,
+            "one_for_city": "true", 
+        }
+        print(f"DEBUG: Querying Kiwi API with params: {querystring}")
+
+        try:
+            response = requests.get(url, headers=headers, params=querystring, timeout=15)
+            response.raise_for_status() 
+            data = response.json()
+
+            if data and data.get('data'):
+                cheapest_flight = None
+                if isinstance(data['data'], list) and data['data']:
+                    cheapest_flight = min(data['data'], key=lambda x: x.get('price', float('inf')), default=None)
+                elif isinstance(data['data'], dict): 
+                     for key, flight_info in data['data'].items():
+                         if cheapest_flight is None or flight_info.get('price', float('inf')) < cheapest_flight.get('price', float('inf')):
+                             cheapest_flight = flight_info
+
+                if cheapest_flight:
+                    price = cheapest_flight.get('price')
+                    currency = cheapest_flight.get('currency', 'USD').upper()
+                    deep_link = cheapest_flight.get('deep_link', 'N/A')
+                    results.append(f"To {dest}: ~{price} {currency}. (Book via: {deep_link[:50]}...)")
+                else:
+                    results.append(f"To {dest}: No direct flights found or prices unavailable.")
+            else:
+                results.append(f"To {dest}: No flight data found for this search.")
+
+        except requests.exceptions.Timeout:
+            results.append(f"Error fetching flights to {dest}: Request timed out.")
+        except requests.exceptions.RequestException as e:
+            results.append(f"Error fetching flights to {dest}: {e}")
+        except Exception as e:
+            results.append(f"An unexpected error occurred for {dest}: {e}")
+
+    if not results:
+        return "No flight price data could be retrieved for any of the destinations."
+    return "Estimated flight prices (from your departure city to suggested destinations):\n" + "\n".join(results)
+
+
 information_gathering_agent = None
 try:
     information_gathering_agent = Agent(
