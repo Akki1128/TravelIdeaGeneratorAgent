@@ -26,7 +26,7 @@ def suggestion_completion_tool(session_id: str = "default_session") -> str:
     This tool provides a clear signal for the orchestrator to take the next action.
     """
     print(f"DEBUG: Suggestion generation completed for session '{session_id}'")
-    return "Suggestion generation completed."
+    return ""
 
 
 information_gathering_agent = None
@@ -44,7 +44,7 @@ try:
             "1.  **Your Departure City/Airport:** (e.g., 'New York', 'London Heathrow')\n"
             "2.  **Your desired Geographical Scope/Region:** (e.g., 'domestic', 'international', 'open to anywhere', 'Europe', 'Southeast Asia')\n"
             "3.  **Your Trip Duration:** (e.g., '3 days', '1 week', '10 days')\n"
-            "4.  **Your Travel Dates (Exact Start and End Dates):** (e.g., 'Start: 01/07/2025, End: 07/07/2025' or 'Start: 2025-12-01, End: 2026-02-28')\n"
+            "4.  **Your Travel Start Date:** (e.g., '01/07/2025' or '2025-12-01')\n"
             "5.  **Your Primary Interests/Activities:** (e.g., 'hiking', 'museums', 'beaches', 'foodie adventures')\n\n"
             "Providing as much detail as possible upfront helps me give you the best suggestions!\"\n\n"
 
@@ -59,7 +59,8 @@ try:
 
             "**Special Handling for Travel Dates (Q4):**\n"
             "When the user provides their 'Travel Dates', make sure to extract both the start and end dates. Record them separately as `record_travel_preference('Start Date', start_date_value)` and `record_travel_preference('End Date', end_date_value)`. Guide the user to provide dates in DD/MM/YYYY or BCE-MM-DD format if they give ambiguous input.\n\n"
-
+            "If the user provides a duration like '1 week' and a start date '2025-07-01', you must internally convert '1 week' to 7 days and calculate the end date '2025-07-07'."
+            
             "**General Missing Information Handling:**\n"
             "If any other information (Geographical Scope, Duration, Interests) is missing after the user's initial or subsequent responses, identify *all* the missing items and ask for them in a single, clear follow-up question. For example: "
             "\"Thanks for [provided info]! I still need to know your [Missing Q1], [Missing Q2], and [Missing Q3]. Could you please provide those?\"\n\n"
@@ -150,6 +151,7 @@ try:
         instruction=(
             "You are the main Travel Planner Orchestrator. "
             "Your primary task is to guide the user through the budget-friendly travel planning process from start to finish. "
+            "**Critically, when you transfer control to another agent, do NOT announce this transfer to the user. Perform the transfer silently.**\n\n" # MOVED: Global negative constraint for announcements
             "**START OF CONVERSATION LOGIC:**\n"
             "1. **Initial Welcome & Transition to Info Gathering:** "
             "   When a new session begins, or as the initial interaction, your response MUST immediately be: 'Hello! I'm your Budget-Friendly Travel Idea Generator. I'm here to help you plan your perfect trip.' "
@@ -161,7 +163,7 @@ try:
             "3. **Idea Generation:** Once the 'information_gathering_agent' finishes its turn by presenting the summary of gathered information and states it is ready for ideas, **you must immediately** take back control and delegate to the 'suggestion_generation_agent' to generate multiple budget-friendly travel ideas. **Do not wait for any user input between the information summary and the idea generation.** The 'suggestion_generation_agent' will then present the ideas and ask the user which idea they'd like an itinerary for."
             "4. **Itinerary Generation Request Handling:** "
             "   After the 'suggestion_generation_agent' presents ideas, calls its `suggestion_completion_tool()`, and asks for a choice, you, the orchestrator, must carefully listen to the user's next response.\n"
-            "   - If the user explicitly asks for an itinerary for one of the suggested ideas (e.g., 'Generate for idea 2', 'Yes, for the Bali trip', 'Tell me more about option 1'), "
+            "   - If the user explicitly asks for an itinerary for one of the suggested ideas (e.g., 'Idea 1', 'Generate for idea 2', 'Yes, for the Bali trip', 'Tell me more about option 1'), "
             "     take back control and then **transfer to the 'itinerary_generation_agent'**, ensuring to pass both the initial collected preferences AND the chosen idea details to it.\n"
             "   - If the user declines an itinerary (e.g., 'No thanks', 'Not right now'), offer to generate more ideas or ask if they have other questions related to travel planning. Do not transfer to `itinerary_generation_agent`.\n"
             "   - If the user asks for something else not related to itinerary generation (e.g., 'What about flights?'), handle it appropriately or guide them back to the itinerary choice."
