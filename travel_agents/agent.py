@@ -1,4 +1,5 @@
 import os
+import json
 import requests
 from typing import Optional
 from google.genai import types  # type: ignore
@@ -28,6 +29,78 @@ def suggestion_completion_tool(session_id: str = "default_session") -> str:
     print(f"DEBUG: Suggestion generation completed for session '{session_id}'")
     return ""
 
+
+def search_flights(
+    departure_city: str,
+    destination_city: str,
+    start_date: str, 
+    end_date: str,    
+    session_id: str = "default_session"
+) -> str:
+    
+    RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
+    if not RAPIDAPI_KEY:
+        return json.dumps({"error": "RapidAPI key not configured. Please set RAPIDAPI_KEY in your .env file."})
+
+    url = "https://kiwi-com-cheap-flights.p.rapidapi.com/flights"
+
+    headers = {
+        "X-RapidAPI-Key": RAPIDAPI_KEY,
+        "X-RapidAPI-Host": "kiwi-com-cheap-flights.p.rapidapi.com"
+    }
+
+    formatted_start_date = f"{start_date}T00:00:00"
+    formatted_end_date = f"{end_date}T00:00:00"
+
+    formatted_departure_city = f"City:{departure_city.strip()}"
+    formatted_destination_city = f"City:{destination_city.strip()}"
+
+    params = {
+        "round_trip": "1", 
+        "source": formatted_departure_city, 
+        "destination": formatted_destination_city, 
+        "outboundDepartmentDateStart": formatted_start_date, 
+        "outboundDepartmentDateEnd": formatted_end_date,     
+        "inboundDepartureDateStart": formatted_start_date,   
+        "inboundDepartureDateEnd": formatted_end_date,       
+        "adults": "1",
+        "children": "0",
+        "infants": "0",
+        "currency": "USD",
+        "limit": "1"
+    }
+
+    print(f"DEBUG: Request URL: {url}")
+    print(f"DEBUG: Request Headers: {headers}")
+    print(f"DEBUG: Request Params: {params}")
+    print(f"DEBUG: Calling RapidAPI for Kiwi.com flights: {formatted_departure_city} to {formatted_destination_city} ({formatted_start_date} to {formatted_end_date})")
+
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        print(f"DEBUG: API Response Status Code: {response.status_code}")
+        print(f"DEBUG: API Raw Response Text: {response.text}")
+        response.raise_for_status() 
+        data = response.json()
+
+        if data and data.get('data'):
+            cheapest_flight = None
+            if data['data']:
+                cheapest_flight = data['data'][0] 
+            
+            if cheapest_flight and 'price' in cheapest_flight and 'deep_link' in cheapest_flight:
+                return json.dumps({
+                    "min_price": cheapest_flight['price'],
+                    "booking_link": cheapest_flight['deep_link'],
+                    "currency": cheapest_flight.get('currency', params['currency'])
+                })
+        return json.dumps({"error": "No budget-friendly flights found for these dates and destination."})
+
+    except requests.exceptions.Timeout:
+        return json.dumps({"error": "Flight API request timed out. Please try again later."})
+    except requests.exceptions.RequestException as e:
+        return json.dumps({"error": f"Flight API request failed: {e}. Check network, RapidAPI key, or host."})
+    except Exception as e:
+        return json.dumps({"error": f"Error processing flight data: {e}"})
 
 information_gathering_agent = None
 try:
@@ -98,21 +171,25 @@ try:
             "You are the Budget-Friendly Travel Idea Generator Agent. "
             "Your primary task is to propose 5 distinct and compelling budget-friendly travel *ideas* (destinations) based on the user's collected preferences. "
             "The information you have received includes: Departure City/Airport, Geographical Scope/Region, Duration, Start Date, End Date, and Primary Interests/Activities. "
-            "Since direct flight price lookups are not available in this phase, you should focus on generally budget-friendly destinations that align with the user's geographical scope, duration, and interests. "
-            "For example, if the user wants an 'international' trip and likes 'history', suggest historically rich but often affordable places like certain cities in Eastern Europe or Southeast Asia.\n\n"
-            "**You are not responsible for, nor should you attempt, any agent transfers or delegation to other agents.** Your only role is to generate and present ideas, signal your own completion, and prompt the user for their choice.\n\n" # Added crucial constraint
+            "**Crucially, you MUST use the `search_flights` tool to verify flight costs and ensure your suggestions are truly budget-friendly.** "
+            "For each potential destination, call `search_flights` with the user's departure city, the potential destination, and their travel dates. "
+            "Prioritize destinations where the flight costs returned by the tool are relatively low or within an implied budget. "
+            "If no budget-friendly flights are found for a promising destination, consider an alternative or briefly mention the high flight cost as a reason not to suggest it. "
+            "For example, if the user wants an 'international' trip and likes 'history', suggest historically rich but often affordable places like certain cities in Eastern Europe or Southeast Asia, *after verifying flight prices*.\n\n"
+            "**You are strictly prohibited from performing any agent transfers or delegation to other agents.** Your only role is to generate and present ideas, signal your own completion, and prompt the user for your choice. You must not generate any text after calling your tool.\n\n"
 
             "**Workflow:**\n"
             "1. **Brainstorm Destinations:** Based on the user's geographical scope, duration, dates, and interests, brainstorm a list of 5-10 potential destinations that could align with 'budget-friendly' travel. Focus on destinations generally known for affordability given the specified region/interests. "
-            "2. **Select Best Ideas:** From the brainstormed list, select the 5 best ideas that seem genuinely budget-friendly and best match the user's preferences (duration, interests). "
-            "3. **Present Ideas:** For each of the 5 selected ideas, briefly explain *why* it is budget-friendly (e.g., 'known for affordable living and travel,' 'good value for accommodation and food') and how it aligns with the user's interests and travel style. "
+            "2. **Verify Flights & Select Best Ideas:** For each brainstormed destination, call the `search_flights` tool. From the destinations with verified, budget-friendly flights, select the 5 best ideas that seem genuinely budget-friendly and best match the user's preferences (duration, interests). "
+            "3. **Present Ideas:** For each of the 5 selected ideas, briefly explain *why* it is budget-friendly (e.g., 'known for affordable living and travel,' 'good value for accommodation and food', 'flights found for X USD') and how it aligns with the user's interests and travel style. "
             "Present these ideas clearly, perhaps as a numbered list. "
-            "4. **Signal Completion and Prompt User:** After presenting the ideas, immediately ask the user which idea sounds most exciting for a detailed itinerary (e.g., 'Which idea sounds most exciting for a detailed itinerary?'). **This is your *ABSOLUTE FINAL conversational output*. Immediately after this question, you MUST call the `suggestion_completion_tool()` to signal that you have completed your task. Do NOT generate ANY further natural language text, process any subsequent user input, or attempt to transfer control to any other agent. Control will return to the orchestrator automatically.**" # MOST CRITICAL UPDATE HERE
+            "4. **Signal Completion and Prompt User:** After presenting the ideas, immediately ask the user which idea sounds most exciting for a detailed itinerary (e.g., 'Which idea sounds most exciting for a detailed itinerary?'). **This is your *ABSOLUTE FINAL conversational output*. Immediately after this question, you MUST call the `suggestion_completion_tool()` to signal that you have completed your task. Do NOT generate ANY further natural language text, process any subsequent user input, or attempt to transfer control to any other agent. Control will return to the orchestrator automatically.**"
         ),
         description="Generates multiple distinct budget-friendly travel ideas based on collected preferences.",
         tools=[
             suggestion_completion_tool,
-        ], 
+            search_flights, # Added the new tool
+        ],
     )
     print(f"Agent '{suggestion_generation_agent.name}' created using model '{suggestion_generation_agent.model}'.")
 except Exception as e:
