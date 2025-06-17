@@ -2,6 +2,7 @@ import os
 import json
 import requests
 from typing import Optional
+from datetime import datetime
 from google.genai import types  # type: ignore
 from dotenv import load_dotenv
 from google.adk.agents import Agent # type: ignore
@@ -29,63 +30,135 @@ def suggestion_completion_tool(session_id: str = "default_session") -> str:
     print(f"DEBUG: Suggestion generation completed for session '{session_id}'")
     return ""
 
+def format_date_for_api(date_str: str) -> str:
+    """
+    Converts a date string (DD/MM/YYYY or YYYY-MM-DD) to YYYY-MM-DD format.
+    """
+    try:
+        # Try parsing as DD/MM/YYYY first
+        dt_obj = datetime.strptime(date_str, "%d/%m/%Y")
+    except ValueError:
+        try:
+            # If that fails, try YYYY-MM-DD
+            dt_obj = datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            # If both fail, raise an error
+            raise ValueError(f"Date format not recognized: {date_str}. Expected DD/MM/YYYY or YYYY-MM-DD.")
+    # Return in YYYY-MM-DD format, as required by API
+    return dt_obj.strftime("%Y-%m-%d")
+
 
 def search_flights(
     departure_city: str,
+    departure_country_code: str, # Country code for departure city (e.g., "us", "uk", "in")
     destination_city: str,
-    start_date: str, 
-    end_date: str,    
+    destination_country_code: str, # Country code for destination city (e.g., "us", "uk", "in")
+    start_date: str, # Can be DD/MM/YYYY or YYYY-MM-DD
+    end_date: str,    # Can be DD/MM/YYYY or YYYY-MM-DD
     session_id: str = "default_session"
 ) -> str:
-    
+    """
+    Searches for the cheapest flights between specified cities and dates using the Kiwi.com API via RapidAPI.
+    Requires city names and their respective country codes for precise searching.
+    The agent should determine whether to use 'City:cityname_countrycode' or 'Country:XX' format.
+    Returns a JSON string containing min_price, booking_link, and currency, or an error message.
+    """
     RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
     if not RAPIDAPI_KEY:
         return json.dumps({"error": "RapidAPI key not configured. Please set RAPIDAPI_KEY in your .env file."})
 
-    url = "https://kiwi-com-cheap-flights.p.rapidapi.com/flights"
+    url = "https://kiwi-com-cheap-flights.p.rapidapi.com/round-trip" 
 
     headers = {
         "X-RapidAPI-Key": RAPIDAPI_KEY,
         "X-RapidAPI-Host": "kiwi-com-cheap-flights.p.rapidapi.com"
     }
 
-    formatted_start_date = f"{start_date}T00:00:00"
-    formatted_end_date = f"{end_date}T00:00:00"
+    # --- Call the external helper function for date formatting ---
+    try:
+        formatted_start_date_base = format_date_for_api(start_date)
+        formatted_end_date_base = format_date_for_api(end_date)
+    except ValueError as e:
+        # If date parsing fails in the tool, return an JSON error message
+        return json.dumps({"error": f"Invalid date format provided to flight search: {e}. Please ensure dates are DD/MM/YYYY or YYYY-MM-DD."})
 
-    formatted_departure_city = f"City:{departure_city.strip()}"
-    formatted_destination_city = f"City:{destination_city.strip()}"
+    # Append time component as API examples show
+    formatted_start_date = f"{formatted_start_date_base}T00:00:00"
+    formatted_end_date = f"{formatted_end_date_base}T00:00:00"
+    # --- End Date Formatting ---
 
+
+    # Determine source and destination format: City:name_code or Country:XX
+    formatted_departure_location = ""
+    if departure_city.lower() == "country" and len(departure_country_code) == 2:
+        formatted_departure_location = f"Country:{departure_country_code.strip().upper()}"
+    else:
+        formatted_departure_location = f"City:{departure_city.strip().lower()}_{departure_country_code.strip().lower()}"
+
+    formatted_destination_location = ""
+    if destination_city.lower() == "country" and len(destination_country_code) == 2:
+        formatted_destination_location = f"Country:{destination_country_code.strip().upper()}"
+    else:
+        formatted_destination_location = f"City:{destination_city.strip().lower()}_{destination_country_code.strip().lower()}"
+    
     params = {
-        "round_trip": "1", 
-        "source": formatted_departure_city, 
-        "destination": formatted_destination_city, 
+        "round_trip": "1",
+        "source": formatted_departure_location,
+        "destination": formatted_destination_location,
         "outboundDepartmentDateStart": formatted_start_date, 
-        "outboundDepartmentDateEnd": formatted_end_date,     
-        "inboundDepartureDateStart": formatted_start_date,   
-        "inboundDepartureDateEnd": formatted_end_date,       
+        "outboundDepartmentDateEnd": formatted_end_date,
+        "inboundDepartureDateStart": formatted_start_date, # Mirroring outbound for simplicity in this example
+        "inboundDepartureDateEnd": formatted_end_date,     # Mirroring outbound for simplicity in this example
         "adults": "1",
         "children": "0",
         "infants": "0",
         "currency": "USD",
-        "limit": "1"
+        "limit": "10", # <--- **THIS IS THE CHANGE: Now set to 10**
+        "locale": "en",
+        "handbags": "1",
+        "holdbags": "0",
+        "cabinClass": "ECONOMY",
+        "sortBy": "QUALITY",
+        "sortOrder": "ASCENDING",
+        "applyMixedClasses": "true",
+        "allowReturnFromDifferentCity": "true",
+        "allowChangeInboundDestination": "true",
+        "allowChangeInboundSource": "true",
+        "allowDifferentStationConnection": "true",
+        "enableSelfTransfer": "true",
+        "allowOvernightStopover": "true",
+        "enableTrueHiddenCity": "true",
+        "enableThrowAwayTicketing": "true",
+        # "outbound": "SUNDAY,MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY", # <--- **THIS LINE IS NOW REMOVED/COMMENTED OUT**
+        "transportTypes": "FLIGHT",
+        "contentProviders": "FRESH,KAYAK,KIWI", # <--- **THIS IS THE CHANGE: Flixbus removed**
     }
 
     print(f"DEBUG: Request URL: {url}")
     print(f"DEBUG: Request Headers: {headers}")
     print(f"DEBUG: Request Params: {params}")
-    print(f"DEBUG: Calling RapidAPI for Kiwi.com flights: {formatted_departure_city} to {formatted_destination_city} ({formatted_start_date} to {formatted_end_date})")
+    print(f"DEBUG: Calling RapidAPI for Kiwi.com flights: {formatted_departure_location} to {formatted_destination_location} ({formatted_start_date} to {formatted_end_date})")
 
     try:
         response = requests.get(url, headers=headers, params=params, timeout=15)
         print(f"DEBUG: API Response Status Code: {response.status_code}")
         print(f"DEBUG: API Raw Response Text: {response.text}")
-        response.raise_for_status() 
+        response.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
         data = response.json()
 
-        if data and data.get('data'):
-            cheapest_flight = None
-            if data['data']:
-                cheapest_flight = data['data'][0] 
+        # Check for the specific downstream error from Kiwi.com (code 422)
+        if data.get('metadata', {}).get('statusPerProvider'):
+            for provider_status in data['metadata']['statusPerProvider']:
+                if provider_status.get('provider', {}).get('id') == 'ContentProvider:KIWI' and \
+                   provider_status.get('errorHappened') and \
+                   "code:422" in provider_status.get('errorMessage', ''):
+                    return json.dumps({
+                        "error": "Flight API (Kiwi.com via RapidAPI) encountered a processing error (code 422) for this specific query. It might be due to the route, dates being too far in the future, or the complexity of the search for this API. Please try different dates or a major international hub if you haven't already."
+                    })
+
+        # Check if itineraries were found and are valid
+        if data and data.get('itinerariesCount', 0) > 0 and data.get('itineraries'):
+            cheapest_flight = data['itineraries'][0] # Access 'itineraries' list
             
             if cheapest_flight and 'price' in cheapest_flight and 'deep_link' in cheapest_flight:
                 return json.dumps({
@@ -93,12 +166,14 @@ def search_flights(
                     "booking_link": cheapest_flight['deep_link'],
                     "currency": cheapest_flight.get('currency', params['currency'])
                 })
+        
+        # Fallback if itinerariesCount is 0 (no flights found) but no specific 422 caught or data structure is unexpected
         return json.dumps({"error": "No budget-friendly flights found for these dates and destination."})
 
     except requests.exceptions.Timeout:
         return json.dumps({"error": "Flight API request timed out. Please try again later."})
     except requests.exceptions.RequestException as e:
-        return json.dumps({"error": f"Flight API request failed: {e}. Check network, RapidAPI key, or host."})
+        return json.dumps({"error": f"Flight API request failed: {e}. Check network, RapidAPI key, or ensure source/destination format is correct (e.g., City:warsaw_pl or Country:GB)."})
     except Exception as e:
         return json.dumps({"error": f"Error processing flight data: {e}"})
 
@@ -172,15 +247,22 @@ try:
             "Your primary task is to propose 5 distinct and compelling budget-friendly travel *ideas* (destinations) based on the user's collected preferences. "
             "The information you have received includes: Departure City/Airport, Geographical Scope/Region, Duration, Start Date, End Date, and Primary Interests/Activities. "
             "**Crucially, you MUST use the `search_flights` tool to verify flight costs and ensure your suggestions are truly budget-friendly.** "
-            "For each potential destination, call `search_flights` with the user's departure city, the potential destination, and their travel dates. "
-            "Prioritize destinations where the flight costs returned by the tool are relatively low or within an implied budget. "
-            "If no budget-friendly flights are found for a promising destination, consider an alternative or briefly mention the high flight cost as a reason not to suggest it. "
-            "For example, if the user wants an 'international' trip and likes 'history', suggest historically rich but often affordable places like certain cities in Eastern Europe or Southeast Asia, *after verifying flight prices*.\n\n"
-            "**You are strictly prohibited from performing any agent transfers or delegation to other agents.** Your only role is to generate and present ideas, signal your own completion, and prompt the user for your choice. You must not generate any text after calling your tool.\n\n"
+
+            "**VERY IMPORTANT for Flight Search Parameters:**\n"
+            "The `search_flights` tool requires the `source` and `destination` parameters to be in a specific format: `City:cityname_countrycode` (e.g., `City:newyork_us`, `City:london_uk`, `City:delhi_in`). Sometimes it can also take `Country:XX` (e.g., `Country:GB`).\n"
+            "**You are fully responsible for determining the correct `cityname_countrycode` or `Country:XX` for ALL locations you pass to `search_flights` (both the user's departure location and each brainstormed destination).**\n"
+            "   - For the user's **departure location**, identify its primary airport city and its corresponding 2-letter ISO country code. (e.g., if 'San Francisco' is the departure city, use 'sanfrancisco' and 'us'). If the user implies a departure country (e.g., 'from the UK'), you can use 'Country' as `departure_city` and 'UK' as `departure_country_code`.\n"
+            "   - For each **brainstormed destination**, identify the most appropriate airport city and its 2-letter ISO country code. \n"
+            "   - **Critical Strategy for International Destinations:** For long-haul international trips (e.g., US to Asia), when you brainstorm a destination that is not a major international gateway (e.g., Rishikesh in India), **you MUST first search flights to the nearest *major international airport hub* for that region** (e.g., for Rishikesh, search to Delhi - `City:delhi_in`, or for Munnar, search to Kochi - `City:kochi_in`). This is because smaller airports may not have reliable direct international flight data in the API, or the API might fail for long-distance searches to them. The idea is to find a budget-friendly flight *to the country*, and then the detailed itinerary can suggest further local travel from that main hub. For domestic flights, you can continue to use the nearest regional airport if appropriate.\n" # <-- **THIS IS THE KEY CHANGE**
 
             "**Workflow:**\n"
-            "1. **Brainstorm Destinations:** Based on the user's geographical scope, duration, dates, and interests, brainstorm a list of 5-10 potential destinations that could align with 'budget-friendly' travel. Focus on destinations generally known for affordability given the specified region/interests. "
-            "2. **Verify Flights & Select Best Ideas:** For each brainstormed destination, call the `search_flights` tool. From the destinations with verified, budget-friendly flights, select the 5 best ideas that seem genuinely budget-friendly and best match the user's preferences (duration, interests). "
+            "1. **Brainstorm Destinations:** Based on the user's geographical scope, duration, dates, and interests, brainstorm a list of **6-8 potential destinations** that could align with 'budget-friendly' travel. Consider a diverse set of options within the specified region/interests. When brainstorming, explicitly think about major airport hubs or popular entry points for the region.\n"
+            "2. **Determine Country Codes, Verify Flights & Select Best Ideas:** For each brainstormed destination:\n"
+            "  a. **First, perform an internal lookup/reasoning step:** Determine the most accurate city name and its 2-letter ISO country code that the `search_flights` API would recognize, especially considering the nearest airport for non-airport destinations as described above."
+            "  b. **Determine the 2-letter ISO country code for the user's Departure City.** If the user only provides a country (e.g. 'UK'), treat 'Country' as the city name and the country code as 'uk'.\n"
+            "  c. **Then, call the `search_flights` tool**, passing the precisely formatted city names (e.g., 'London' for `destination_city`, 'uk' for `destination_country_code`) along with the dates.\n"
+            "  **Handle API Errors:** If `search_flights` returns an error (e.g., \"API request failed\" or \"No budget-friendly flights found\"), analyze the error. If it indicates a problem with the city/country code, try a different, more common airport in the region, or move on to the next brainstormed idea. If it's a general API issue, note it. \n"
+            "  From the destinations with verified, budget-friendly flights, select the **5 best ideas** that seem genuinely budget-friendly and best match the user's preferences (duration, interests). If fewer than 5 ideas are found, present what you have.\n"
             "3. **Present Ideas:** For each of the 5 selected ideas, briefly explain *why* it is budget-friendly (e.g., 'known for affordable living and travel,' 'good value for accommodation and food', 'flights found for X USD') and how it aligns with the user's interests and travel style. "
             "Present these ideas clearly, perhaps as a numbered list. "
             "4. **Signal Completion and Prompt User:** After presenting the ideas, immediately ask the user which idea sounds most exciting for a detailed itinerary (e.g., 'Which idea sounds most exciting for a detailed itinerary?'). **This is your *ABSOLUTE FINAL conversational output*. Immediately after this question, you MUST call the `suggestion_completion_tool()` to signal that you have completed your task. Do NOT generate ANY further natural language text, process any subsequent user input, or attempt to transfer control to any other agent. Control will return to the orchestrator automatically.**"
@@ -188,7 +270,7 @@ try:
         description="Generates multiple distinct budget-friendly travel ideas based on collected preferences.",
         tools=[
             suggestion_completion_tool,
-            search_flights, # Added the new tool
+            search_flights,
         ],
     )
     print(f"Agent '{suggestion_generation_agent.name}' created using model '{suggestion_generation_agent.model}'.")
