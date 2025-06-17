@@ -50,19 +50,13 @@ def format_date_for_api(date_str: str) -> str:
 
 def search_flights(
     departure_city: str,
-    departure_country_code: str, # Country code for departure city (e.g., "us", "uk", "in")
+    departure_country_code: str, 
     destination_city: str,
-    destination_country_code: str, # Country code for destination city (e.g., "us", "uk", "in")
-    start_date: str, # Can be DD/MM/YYYY or YYYY-MM-DD
-    end_date: str,    # Can be DD/MM/YYYY or YYYY-MM-DD
+    destination_country_code: str, 
+    start_date: str, 
+    end_date: str,    
     session_id: str = "default_session"
 ) -> str:
-    """
-    Searches for the cheapest flights between specified cities and dates using the Kiwi.com API via RapidAPI.
-    Requires city names and their respective country codes for precise searching.
-    The agent should determine whether to use 'City:cityname_countrycode' or 'Country:XX' format.
-    Returns a JSON string containing min_price, booking_link, and currency, or an error message.
-    """
     RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
     if not RAPIDAPI_KEY:
         return json.dumps({"error": "RapidAPI key not configured. Please set RAPIDAPI_KEY in your .env file."})
@@ -74,19 +68,14 @@ def search_flights(
         "X-RapidAPI-Host": "kiwi-com-cheap-flights.p.rapidapi.com"
     }
 
-    # --- Call the external helper function for date formatting ---
     try:
         formatted_start_date_base = format_date_for_api(start_date)
         formatted_end_date_base = format_date_for_api(end_date)
     except ValueError as e:
-        # If date parsing fails in the tool, return an JSON error message
         return json.dumps({"error": f"Invalid date format provided to flight search: {e}. Please ensure dates are DD/MM/YYYY or YYYY-MM-DD."})
 
-    # Append time component as API examples show
     formatted_start_date = f"{formatted_start_date_base}T00:00:00"
     formatted_end_date = f"{formatted_end_date_base}T00:00:00"
-    # --- End Date Formatting ---
-
 
     # Determine source and destination format: City:name_code or Country:XX
     formatted_departure_location = ""
@@ -107,13 +96,13 @@ def search_flights(
         "destination": formatted_destination_location,
         "outboundDepartmentDateStart": formatted_start_date, 
         "outboundDepartmentDateEnd": formatted_end_date,
-        "inboundDepartureDateStart": formatted_start_date, # Mirroring outbound for simplicity in this example
-        "inboundDepartureDateEnd": formatted_end_date,     # Mirroring outbound for simplicity in this example
+        "inboundDepartureDateStart": formatted_start_date, 
+        "inboundDepartureDateEnd": formatted_end_date,     
         "adults": "1",
         "children": "0",
         "infants": "0",
         "currency": "USD",
-        "limit": "10", # <--- **THIS IS THE CHANGE: Now set to 10**
+        "limit": "10", 
         "locale": "en",
         "handbags": "1",
         "holdbags": "0",
@@ -129,9 +118,9 @@ def search_flights(
         "allowOvernightStopover": "true",
         "enableTrueHiddenCity": "true",
         "enableThrowAwayTicketing": "true",
-        # "outbound": "SUNDAY,MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY", # <--- **THIS LINE IS NOW REMOVED/COMMENTED OUT**
+        # "outbound": "SUNDAY,MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY", 
         "transportTypes": "FLIGHT",
-        "contentProviders": "FRESH,KAYAK,KIWI", # <--- **THIS IS THE CHANGE: Flixbus removed**
+        "contentProviders": "FRESH,KAYAK,KIWI", 
     }
 
     print(f"DEBUG: Request URL: {url}")
@@ -143,7 +132,7 @@ def search_flights(
         response = requests.get(url, headers=headers, params=params, timeout=15)
         print(f"DEBUG: API Response Status Code: {response.status_code}")
         print(f"DEBUG: API Raw Response Text: {response.text}")
-        response.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
+        response.raise_for_status() 
         data = response.json()
 
         # Check for the specific downstream error from Kiwi.com (code 422)
@@ -158,7 +147,7 @@ def search_flights(
 
         # Check if itineraries were found and are valid
         if data and data.get('itinerariesCount', 0) > 0 and data.get('itineraries'):
-            cheapest_flight = data['itineraries'][0] # Access 'itineraries' list
+            cheapest_flight = data['itineraries'][0] 
             
             if cheapest_flight and 'price' in cheapest_flight and 'deep_link' in cheapest_flight:
                 return json.dumps({
