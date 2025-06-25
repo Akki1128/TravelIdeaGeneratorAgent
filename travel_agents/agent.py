@@ -2,7 +2,7 @@ import os
 import json
 import requests
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from google.genai import types  # type: ignore
 from dotenv import load_dotenv
 from google.adk.agents import Agent # type: ignore
@@ -11,6 +11,64 @@ from google.adk.agents import Agent # type: ignore
 #from google.adk.sessions import InMemorySessionService # type: ignore
 
 load_dotenv()
+
+_amadeus_access_token = None
+_amadeus_token_expiry = None
+
+
+def _get_amadeus_access_token():
+    """
+    Obtains or refreshes an Amadeus API access token.
+    Tokens are cached and refreshed if expired.
+    """
+    global _amadeus_access_token, _amadeus_token_expiry
+
+    # Check if token is still valid (refresh a bit before actual expiry)
+    if _amadeus_access_token and _amadeus_token_expiry and datetime.now() < _amadeus_token_expiry:
+        print("DEBUG: Using cached Amadeus access token.")
+        return _amadeus_access_token
+
+    # Get credentials from environment variables
+    AMADEUS_CLIENT_ID = os.getenv("AMADEUS_CLIENT_ID")
+    AMADEUS_CLIENT_SECRET = os.getenv("AMADEUS_CLIENT_SECRET")
+
+    if not AMADEUS_CLIENT_ID or not AMADEUS_CLIENT_SECRET:
+        raise ValueError("Amadeus Client ID and/or Client Secret not configured. Please set AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET in your .env file.")
+
+    token_url = "https://test.api.amadeus.com/v1/security/oauth2/token" # Using test environment
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+    data = {
+        'grant_type': 'client_credentials',
+        'client_id': AMADEUS_CLIENT_ID,
+        'client_secret': AMADEUS_CLIENT_SECRET
+    }
+
+    try:
+        print("DEBUG: Requesting new Amadeus access token...")
+        response = requests.post(token_url, headers=headers, data=data, timeout=10)
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+        token_data = response.json()
+
+        _amadeus_access_token = token_data['access_token']
+        expires_in = token_data.get('expires_in', 3500) # Default to 3500 seconds if not specified
+        _amadeus_token_expiry = datetime.now() + timedelta(seconds=expires_in - 60) # Subtract 60 seconds for buffer
+        print(f"DEBUG: Successfully obtained Amadeus access token. Expires in ~{expires_in} seconds.")
+        return _amadeus_access_token
+
+    except requests.exceptions.Timeout:
+        raise ConnectionError("Amadeus token request timed out.")
+    except requests.exceptions.RequestException as e:
+        error_msg = f"Failed to obtain Amadeus token: {e}"
+        if response and response.text:
+            error_msg += f". Response: {response.text}"
+        raise ConnectionError(error_msg)
+    except KeyError:
+        raise ValueError("Invalid response from Amadeus token endpoint (missing access_token or expires_in).")
+    except Exception as e:
+        raise Exception(f"An unexpected error occurred while getting Amadeus token: {e}")
+
 
 def record_travel_preference(preference_name: str, value: str, session_id: str = "default_session") -> str:
     """Records a specific travel preference provided by the user.
@@ -32,139 +90,119 @@ def suggestion_completion_tool(session_id: str = "default_session") -> str:
 
 def format_date_for_api(date_str: str) -> str:
     """
-    Converts a date string (DD/MM/YYYY or YYYY-MM-DD) to YYYY-MM-DD format.
+    Converts a date string (DD/MM/YYYY or YYYY-MM-DD) to YYYY-MM-DD format required by Amadeus.
     """
     try:
-        # Try parsing as DD/MM/YYYY first
-        dt_obj = datetime.strptime(date_str, "%d/%m/%Y")
-    except ValueError:
-        try:
-            # If that fails, try YYYY-MM-DD
-            dt_obj = datetime.strptime(date_str, "%Y-%m-%d")
-        except ValueError:
-            # If both fail, raise an error
-            raise ValueError(f"Date format not recognized: {date_str}. Expected DD/MM/YYYY or YYYY-MM-DD.")
-    # Return in YYYY-MM-DD format, as required by API
-    return dt_obj.strftime("%Y-%m-%d")
+        if '/' in date_str:
+            # Assume DD/MM/YYYY
+            dt_object = datetime.strptime(date_str, "%d/%m/%Y")
+        elif '-' in date_str:
+            # Assume YYYY-MM-DD
+            dt_object = datetime.strptime(date_str, "%Y-%m-%d")
+        else:
+            raise ValueError("Unsupported date format.")
+        return dt_object.strftime("%Y-%m-%d")
+    except ValueError as e:
+        raise ValueError(f"Invalid date format for Amadeus API: {date_str}. Please use DD/MM/YYYY or YYYY-MM-DD. Error: {e}")
 
 
 def search_flights(
-    departure_city: str,
-    departure_country_code: str, 
-    destination_city: str,
-    destination_country_code: str, 
-    start_date: str, 
-    end_date: str,    
+    departure_airport_code: str, # IATA airport code, e.g., "SFO"
+    destination_airport_code: str, # IATA airport code, e.g., "DEL"
+    start_date: str, # Format: YYYY-MM-DD
+    end_date: str, # Format: YYYY-MM-DD
+    num_adults: int = 1,
+    max_price: Optional[int] = None, # Optional: maximum price for the flight offer
+    max_results: int = 5, # Amadeus 'max' parameter for number of results
     session_id: str = "default_session"
 ) -> str:
-    RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
-    if not RAPIDAPI_KEY:
-        return json.dumps({"error": "RapidAPI key not configured. Please set RAPIDAPI_KEY in your .env file."})
+    """
+    Searches for flight offers using the Amadeus Flight Offers Search API.
+    Note: Requires IATA airport codes for departure and destination.
+    """
+    try:
+        access_token = _get_amadeus_access_token()
+    except (ValueError, ConnectionError, Exception) as e:
+        return json.dumps({"error": f"Authentication Error: {e}"})
 
-    url = "https://kiwi-com-cheap-flights.p.rapidapi.com/round-trip" 
+    # Using Amadeus test environment URL
+    flight_offers_url = "https://test.api.amadeus.com/v2/shopping/flight-offers"
 
     headers = {
-        "X-RapidAPI-Key": RAPIDAPI_KEY,
-        "X-RapidAPI-Host": "kiwi-com-cheap-flights.p.rapidapi.com"
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json" # Request JSON response
     }
 
+    # Format dates to YYYY-MM-DD as required by Amadeus
     try:
-        formatted_start_date_base = format_date_for_api(start_date)
-        formatted_end_date_base = format_date_for_api(end_date)
+        formatted_departure_date = format_date_for_api(start_date)
+        formatted_return_date = format_date_for_api(end_date)
     except ValueError as e:
-        return json.dumps({"error": f"Invalid date format provided to flight search: {e}. Please ensure dates are DD/MM/YYYY or YYYY-MM-DD."})
+        return json.dumps({"error": f"Invalid date format: {e}. Please ensure dates are YYYY-MM-DD."})
 
-    formatted_start_date = f"{formatted_start_date_base}T00:00:00"
-    formatted_end_date = f"{formatted_end_date_base}T00:00:00"
-
-    # Determine source and destination format: City:name_code or Country:XX
-    formatted_departure_location = ""
-    if departure_city.lower() == "country" and len(departure_country_code) == 2:
-        formatted_departure_location = f"Country:{departure_country_code.strip().upper()}"
-    else:
-        formatted_departure_location = f"City:{departure_city.strip().lower()}_{departure_country_code.strip().lower()}"
-
-    formatted_destination_location = ""
-    if destination_city.lower() == "country" and len(destination_country_code) == 2:
-        formatted_destination_location = f"Country:{destination_country_code.strip().upper()}"
-    else:
-        formatted_destination_location = f"City:{destination_city.strip().lower()}_{destination_country_code.strip().lower()}"
-    
     params = {
-        "round_trip": "1",
-        "source": formatted_departure_location,
-        "destination": formatted_destination_location,
-        "outboundDepartmentDateStart": formatted_start_date, 
-        "outboundDepartmentDateEnd": formatted_end_date,
-        "inboundDepartureDateStart": formatted_start_date, 
-        "inboundDepartureDateEnd": formatted_end_date,     
-        "adults": "1",
-        "children": "0",
-        "infants": "0",
-        "currency": "USD",
-        "limit": "10", 
-        "locale": "en",
-        "handbags": "1",
-        "holdbags": "0",
-        "cabinClass": "ECONOMY",
-        "sortBy": "QUALITY",
-        "sortOrder": "ASCENDING",
-        "applyMixedClasses": "true",
-        "allowReturnFromDifferentCity": "true",
-        "allowChangeInboundDestination": "true",
-        "allowChangeInboundSource": "true",
-        "allowDifferentStationConnection": "true",
-        "enableSelfTransfer": "true",
-        "allowOvernightStopover": "true",
-        "enableTrueHiddenCity": "true",
-        "enableThrowAwayTicketing": "true",
-        # "outbound": "SUNDAY,MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY", 
-        "transportTypes": "FLIGHT",
-        "contentProviders": "FRESH,KAYAK,KIWI", 
+        "originLocationCode": departure_airport_code.upper(), # Ensure uppercase IATA
+        "destinationLocationCode": destination_airport_code.upper(), # Ensure uppercase IATA
+        "departureDate": formatted_departure_date,
+        "returnDate": formatted_return_date,
+        "adults": num_adults,
+        "currencyCode": "USD", # Default currency, can be made a tool parameter
+        "max": max_results, # Limit the number of results
     }
 
-    print(f"DEBUG: Request URL: {url}")
-    print(f"DEBUG: Request Headers: {headers}")
-    print(f"DEBUG: Request Params: {params}")
-    print(f"DEBUG: Calling RapidAPI for Kiwi.com flights: {formatted_departure_location} to {formatted_destination_location} ({formatted_start_date} to {formatted_end_date})")
+    if max_price is not None:
+        params["maxPrice"] = max_price # Optional parameter for max price
+
+    print(f"DEBUG: Calling Amadeus Flight Offers Search API: {flight_offers_url}")
+    # print(f"DEBUG: Amadeus Request Headers: {headers}") # Avoid logging sensitive token in production
+    print(f"DEBUG: Amadeus Request Params: {params}")
 
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=15)
-        print(f"DEBUG: API Response Status Code: {response.status_code}")
-        print(f"DEBUG: API Raw Response Text: {response.text}")
-        response.raise_for_status() 
+        response = requests.get(flight_offers_url, headers=headers, params=params, timeout=30) # Increased timeout
+        print(f"DEBUG: Amadeus API Response Status Code: {response.status_code}")
+        print(f"DEBUG: Amadeus API Raw Response Text: {response.text}")
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
         data = response.json()
 
-        # Check for the specific downstream error from Kiwi.com (code 422)
-        if data.get('metadata', {}).get('statusPerProvider'):
-            for provider_status in data['metadata']['statusPerProvider']:
-                if provider_status.get('provider', {}).get('id') == 'ContentProvider:KIWI' and \
-                   provider_status.get('errorHappened') and \
-                   "code:422" in provider_status.get('errorMessage', ''):
-                    return json.dumps({
-                        "error": "Flight API (Kiwi.com via RapidAPI) encountered a processing error (code 422) for this specific query. It might be due to the route, dates being too far in the future, or the complexity of the search for this API. Please try different dates or a major international hub if you haven't already."
-                    })
-
-        # Check if itineraries were found and are valid
-        if data and data.get('itinerariesCount', 0) > 0 and data.get('itineraries'):
-            cheapest_flight = data['itineraries'][0] 
+        if data.get('data') and len(data['data']) > 0:
+            # Amadeus returns a list of flight offers. We'll extract details from the first one.
+            cheapest_offer = data['data'][0] 
             
-            if cheapest_flight and 'price' in cheapest_flight and 'deep_link' in cheapest_flight:
+            price_info = cheapest_offer.get('price', {})
+            total_price = price_info.get('total')
+            currency = price_info.get('currency', params['currencyCode'])
+            
+            # Amadeus's deep links can be complex to generate, often handled client-side.
+            # For simplicity, we'll provide a message and indicate success.
+            # If a direct booking link is crucial, a separate Amadeus API (Flight Create Orders) or
+            # a different strategy would be needed.
+
+            if total_price:
                 return json.dumps({
-                    "min_price": cheapest_flight['price'],
-                    "booking_link": cheapest_flight['deep_link'],
-                    "currency": cheapest_flight.get('currency', params['currency'])
+                    "min_price": float(total_price),
+                    "currency": currency,
+                    "message": f"Found a flight offer from {departure_airport_code} to {destination_airport_code} for {total_price} {currency} with Amadeus (test environment). Booking details would typically follow. Please note this is from a test API."
                 })
         
-        # Fallback if itinerariesCount is 0 (no flights found) but no specific 422 caught or data structure is unexpected
-        return json.dumps({"error": "No budget-friendly flights found for these dates and destination."})
+        return json.dumps({"error": "No flight offers found for these dates and destination with Amadeus."})
 
     except requests.exceptions.Timeout:
-        return json.dumps({"error": "Flight API request timed out. Please try again later."})
+        return json.dumps({"error": "Amadeus API request timed out. Please try again later."})
     except requests.exceptions.RequestException as e:
-        return json.dumps({"error": f"Flight API request failed: {e}. Check network, RapidAPI key, or ensure source/destination format is correct (e.g., City:warsaw_pl or Country:GB)."})
+        error_message = f"Amadeus API request failed: {e}"
+        if response and response.status_code != 200:
+            try:
+                # Amadeus errors often come in a specific 'errors' array
+                error_details = response.json()
+                if 'errors' in error_details and isinstance(error_details['errors'], list) and len(error_details['errors']) > 0:
+                    first_error = error_details['errors'][0]
+                    error_message += f". Amadeus Error: {first_error.get('code', '')} - {first_error.get('detail', first_error.get('title', ''))}"
+            except json.JSONDecodeError:
+                error_message += f". Raw response: {response.text}"
+        return json.dumps({"error": error_message})
     except Exception as e:
-        return json.dumps({"error": f"Error processing flight data: {e}"})
+        return json.dumps({"error": f"Error processing Amadeus flight data: {e}"})
+
 
 information_gathering_agent = None
 try:
@@ -178,11 +216,11 @@ try:
 
             "**Initial Greeting and Question:**\n"
             "\"Hello! To help me create the best personalized travel ideas for you, please tell me:\n"
-            "1.  **Your Departure City/Airport:** (e.g., 'New York', 'London Heathrow')\n"
-            "2.  **Your desired Geographical Scope/Region:** (e.g., 'domestic', 'international', 'open to anywhere', 'Europe', 'Southeast Asia')\n"
-            "3.  **Your Trip Duration:** (e.g., '3 days', '1 week', '10 days')\n"
-            "4.  **Your Travel Start Date:** (e.g., '01/07/2025' or '2025-12-01')\n"
-            "5.  **Your Primary Interests/Activities:** (e.g., 'hiking', 'museums', 'beaches', 'foodie adventures')\n\n"
+            "1. **Your Departure City/Airport:** (e.g., 'New York', 'London Heathrow')\n"
+            "2. **Your desired Geographical Scope/Region:** (e.g., 'domestic', 'international', 'open to anywhere', 'Europe', 'Southeast Asia')\n"
+            "3. **Your Trip Duration:** (e.g., '3 days', '1 week', '10 days')\n"
+            "4. **Your Travel Start Date:** (e.g., '01/07/2025' or '2025-12-01')\n"
+            "5. **Your Primary Interests/Activities:** (e.g., 'hiking', 'museums', 'beaches', 'foodie adventures')\n\n"
             "Providing as much detail as possible upfront helps me give you the best suggestions!\"\n\n"
 
             "**During Information Gathering:**\n"
@@ -195,8 +233,9 @@ try:
             "When the user provides their 'Departure City/Airport', record it using `record_travel_preference('Departure City', user_provided_city_value)`. No further tool calls or clarifications are needed for this field for now. Proceed to check for other missing information.\n\n"
 
             "**Special Handling for Travel Dates (Q4):**\n"
-            "When the user provides their 'Travel Dates', make sure to extract both the start and end dates. Record them separately as `record_travel_preference('Start Date', start_date_value)` and `record_travel_preference('End Date', end_date_value)`. Guide the user to provide dates in DD/MM/YYYY or BCE-MM-DD format if they give ambiguous input.\n\n"
-            "If the user provides a duration like '1 week' and a start date '2025-07-01', you must internally convert '1 week' to 7 days and calculate the end date '2025-07-07'."
+            "When the user provides their 'Travel Dates', make sure to extract both the start and end dates. Record them separately as `record_travel_preference('Start Date', start_date_value)` and `record_travel_preference('End Date', end_date_value)`. Guide the user to provide dates in DD/MM/YYYY or YYYY-MM-DD format if they give ambiguous input.\n\n"
+            "**IMPORTANT DATE INTERPRETATION:** When dates are provided in `DD/MM/YYYY` format (e.g., `01/07/2025`), **always interpret the first number as the Day (DD) and the second number as the Month (MM)**. For instance, `01/07/2025` should be understood as July 1st, 2025. Be precise in extracting these values.\n\n"
+            "If the user provides a duration (e.g., '1 week') and a start date (e.g., '2025-07-01'), you must internally calculate the end date by *adding* the duration to the start date (e.g., '2025-07-07'). **It is CRITICAL that the 'End Date' recorded is always chronologically AFTER the 'Start Date'. If the user's input implies an end date that is on or before the start date (after considering the DD/MM/YYYY interpretation), you MUST politely ask the user to clarify or provide a valid date range (e.g., 'It seems the return date is before the departure date. Could you please clarify your intended dates?').**"
             
             "**General Missing Information Handling:**\n"
             "If any other information (Geographical Scope, Duration, Interests) is missing after the user's initial or subsequent responses, identify *all* the missing items and ask for them in a single, clear follow-up question. For example: "
@@ -238,20 +277,19 @@ try:
             "**Crucially, you MUST use the `search_flights` tool to verify flight costs and ensure your suggestions are truly budget-friendly.** "
 
             "**VERY IMPORTANT for Flight Search Parameters:**\n"
-            "The `search_flights` tool requires the `source` and `destination` parameters to be in a specific format: `City:cityname_countrycode` (e.g., `City:newyork_us`, `City:london_uk`, `City:delhi_in`). Sometimes it can also take `Country:XX` (e.g., `Country:GB`).\n"
-            "**You are fully responsible for determining the correct `cityname_countrycode` or `Country:XX` for ALL locations you pass to `search_flights` (both the user's departure location and each brainstormed destination).**\n"
-            "   - For the user's **departure location**, identify its primary airport city and its corresponding 2-letter ISO country code. (e.g., if 'San Francisco' is the departure city, use 'sanfrancisco' and 'us'). If the user implies a departure country (e.g., 'from the UK'), you can use 'Country' as `departure_city` and 'UK' as `departure_country_code`.\n"
-            "   - For each **brainstormed destination**, identify the most appropriate airport city and its 2-letter ISO country code. \n"
-            "   - **Critical Strategy for International Destinations:** For long-haul international trips (e.g., US to Asia), when you brainstorm a destination that is not a major international gateway (e.g., Rishikesh in India), **you MUST first search flights to the nearest *major international airport hub* for that region** (e.g., for Rishikesh, search to Delhi - `City:delhi_in`, or for Munnar, search to Kochi - `City:kochi_in`). This is because smaller airports may not have reliable direct international flight data in the API, or the API might fail for long-distance searches to them. The idea is to find a budget-friendly flight *to the country*, and then the detailed itinerary can suggest further local travel from that main hub. For domestic flights, you can continue to use the nearest regional airport if appropriate.\n" # <-- **THIS IS THE KEY CHANGE**
+            "The `search_flights` tool now requires **IATA airport codes** (e.g., 'SFO' for San Francisco, 'DEL' for Delhi, 'LHR' for London Heathrow) for the `departure_airport_code` and `destination_airport_code` parameters.\n"
+            "**You are fully responsible for determining the correct IATA airport code for ALL locations you pass to `search_flights` (both the user's departure location and each brainstormed destination).**\n"
+            "  - For the user's **departure location**, identify its primary IATA airport code (e.g., if 'San Francisco' is the departure city, use 'SFO'). If the user implies a departure country (e.g., 'from the UK'), you should infer the most common international gateway airport in that country (e.g., for 'UK' consider 'LHR' for London Heathrow, or 'LGW' for London Gatwick). Prioritize major international hubs for country-level departure inputs.\n"
+            "  - For each **brainstormed destination**, identify the most appropriate **IATA airport code** for that location. \n"
+            "  - **Critical Strategy for International Destinations:** For long-haul international trips (e.g., US to Asia), when you brainstorm a destination that is not a major international gateway (e.g., Rishikesh in India), **you MUST first search flights to the nearest *major international airport hub* (IATA code) for that region** (e.g., for Rishikesh, search to DEL for Delhi; for Munnar, search to COK for Kochi). This is because smaller airports may not have reliable direct international flight data in the API. The idea is to find a budget-friendly flight *to the country*, and then the detailed itinerary can suggest further local travel from that main hub. For domestic flights, you can continue to use the nearest regional airport if appropriate.\n"
 
             "**Workflow:**\n"
             "1. **Brainstorm Destinations:** Based on the user's geographical scope, duration, dates, and interests, brainstorm a list of **6-8 potential destinations** that could align with 'budget-friendly' travel. Consider a diverse set of options within the specified region/interests. When brainstorming, explicitly think about major airport hubs or popular entry points for the region.\n"
-            "2. **Determine Country Codes, Verify Flights & Select Best Ideas:** For each brainstormed destination:\n"
-            "  a. **First, perform an internal lookup/reasoning step:** Determine the most accurate city name and its 2-letter ISO country code that the `search_flights` API would recognize, especially considering the nearest airport for non-airport destinations as described above."
-            "  b. **Determine the 2-letter ISO country code for the user's Departure City.** If the user only provides a country (e.g. 'UK'), treat 'Country' as the city name and the country code as 'uk'.\n"
-            "  c. **Then, call the `search_flights` tool**, passing the precisely formatted city names (e.g., 'London' for `destination_city`, 'uk' for `destination_country_code`) along with the dates.\n"
-            "  **Handle API Errors:** If `search_flights` returns an error (e.g., \"API request failed\" or \"No budget-friendly flights found\"), analyze the error. If it indicates a problem with the city/country code, try a different, more common airport in the region, or move on to the next brainstormed idea. If it's a general API issue, note it. \n"
-            "  From the destinations with verified, budget-friendly flights, select the **5 best ideas** that seem genuinely budget-friendly and best match the user's preferences (duration, interests). If fewer than 5 ideas are found, present what you have.\n"
+            "2. **Determine IATA Codes, Verify Flights & Select Best Ideas:** For each brainstormed destination:\n"
+            " a. **First, perform an internal lookup/reasoning step:** Determine the most accurate IATA airport code that the `search_flights` API would recognize, especially considering the nearest major international airport hub for non-airport destinations as described above.\n"
+            " b. **Then, call the `search_flights` tool**, passing the precisely determined IATA codes (e.g., 'SFO' for `departure_airport_code`, 'DEL' for `destination_airport_code`) along with the exact start and end dates.\n"
+            " **Handle API Errors:** If `search_flights` returns an error (e.g., \"Authentication Error\", \"API request timed out\", \"No flight offers found\"), analyze the error. If it indicates a problem with the IATA code, try a different, more common airport in the region, or move on to the next brainstormed idea. If it's a general API issue, note it. \n"
+            " From the destinations with verified, budget-friendly flights, select the **5 best ideas** that seem genuinely budget-friendly and best match the user's preferences (duration, interests). If fewer than 5 ideas are found, present what you have.\n"
             "3. **Present Ideas:** For each of the 5 selected ideas, briefly explain *why* it is budget-friendly (e.g., 'known for affordable living and travel,' 'good value for accommodation and food', 'flights found for X USD') and how it aligns with the user's interests and travel style. "
             "Present these ideas clearly, perhaps as a numbered list. "
             "4. **Signal Completion and Prompt User:** After presenting the ideas, immediately ask the user which idea sounds most exciting for a detailed itinerary (e.g., 'Which idea sounds most exciting for a detailed itinerary?'). **This is your *ABSOLUTE FINAL conversational output*. Immediately after this question, you MUST call the `suggestion_completion_tool()` to signal that you have completed your task. Do NOT generate ANY further natural language text, process any subsequent user input, or attempt to transfer control to any other agent. Control will return to the orchestrator automatically.**"
