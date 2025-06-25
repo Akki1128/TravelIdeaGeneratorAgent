@@ -207,7 +207,7 @@ def search_flights(
 information_gathering_agent = None
 try:
     information_gathering_agent = Agent(
-        model="gemini-1.5-flash",
+        model="gemini-2.5-flash",
         name="information_gathering_agent",
         instruction=(
             "You are the Information Gathering Agent for a budget-friendly travel planner. "
@@ -232,13 +232,13 @@ try:
             "**Special Handling for Departure City (Q1):**\n"
             "When the user provides their 'Departure City/Airport', record it using `record_travel_preference('Departure City', user_provided_city_value)`. No further tool calls or clarifications are needed for this field for now. Proceed to check for other missing information.\n\n"
 
-            "**Special Handling for Travel Dates (Q4):**\n"
-            "When the user provides their 'Travel Dates', make sure to extract both the start and end dates. Record them separately as `record_travel_preference('Start Date', start_date_value)` and `record_travel_preference('End Date', end_date_value)`. Guide the user to provide dates in DD/MM/YYYY or YYYY-MM-DD format if they give ambiguous input.\n\n"
-            "**IMPORTANT DATE INTERPRETATION:** When dates are provided in `DD/MM/YYYY` format (e.g., `01/07/2025`), **always interpret the first number as the Day (DD) and the second number as the Month (MM)**. For instance, `01/07/2025` should be understood as July 1st, 2025. Be precise in extracting these values.\n\n"
-            "If the user provides a duration (e.g., '1 week') and a start date (e.g., '2025-07-01'), you must internally calculate the end date by *adding* the duration to the start date (e.g., '2025-07-07'). **It is CRITICAL that the 'End Date' recorded is always chronologically AFTER the 'Start Date'. If the user's input implies an end date that is on or before the start date (after considering the DD/MM/YYYY interpretation), you MUST politely ask the user to clarify or provide a valid date range (e.g., 'It seems the return date is before the departure date. Could you please clarify your intended dates?').**"
-            
+            "**Special Handling for Travel Dates (Q4) and Duration (Q3):**\n"
+            "When the user provides their 'Travel Dates', make sure to extract the start date. Record it as `record_travel_preference('Start Date', start_date_value)`. Guide the user to provide dates in DD/MM/YYYY or ISO 8601 (YYYY-MM-DD) format if they give ambiguous input.\n\n"
+            "If the user also provides a 'Trip Duration', extract it. You MUST then calculate the end date by adding the duration to the start date. Record the calculated end date as `record_travel_preference('End Date', end_date_value)`. "
+            "**It is CRITICAL that the 'End Date' recorded is always chronologically AFTER the 'Start Date'. If the user's input implies an end date that is on or before the start date, you MUST politely ask the user to clarify or provide a valid date range (e.g., 'It seems the return date is before the departure date. Could you please clarify your intended dates?')**\n\n"
+            "If the user provides a start date but *not* a duration, you MUST explicitly ask for the duration (e.g., 'Okay, and for how long would you like to travel?'). Do not assume a duration.\n\n"
             "**General Missing Information Handling:**\n"
-            "If any other information (Geographical Scope, Duration, Interests) is missing after the user's initial or subsequent responses, identify *all* the missing items and ask for them in a single, clear follow-up question. For example: "
+            "If any other information (Geographical Scope, Interests) is missing after the user's initial or subsequent responses, identify *all* the missing items and ask for them in a single, clear follow-up question. For example: "
             "\"Thanks for [provided info]! I still need to know your [Missing Q1], [Missing Q2], and [Missing Q3]. Could you please provide those?\"\n\n"
 
             "**CONDITIONAL FOLLOW-UPS for Geographical Scope (Q2):**\n"
@@ -268,7 +268,7 @@ except Exception as e:
 suggestion_generation_agent = None
 try:
     suggestion_generation_agent = Agent(
-        model="gemini-1.5-flash",
+        model="gemini-2.5-flash",
         name="suggestion_generation_agent",
         instruction=(
             "You are the Budget-Friendly Travel Idea Generator Agent. "
@@ -309,7 +309,7 @@ except Exception as e:
 itinerary_generation_agent = None
 try:
     itinerary_generation_agent = Agent(
-        model="gemini-1.5-flash",
+        model="gemini-2.5-flash",
         name="itinerary_generation_agent",
         instruction=(
             "You are the Itinerary Generation Agent. Your task is to create a detailed, day-by-day itinerary "
