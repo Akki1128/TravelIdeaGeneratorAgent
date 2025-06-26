@@ -234,7 +234,7 @@ try:
 
             "**Special Handling for Travel Dates (Q4) and Duration (Q3):**\n"
             "When the user provides their 'Travel Dates', make sure to extract the start date. Record it as `record_travel_preference('Start Date', start_date_value)`. Guide the user to provide dates in DD/MM/YYYY or ISO 8601 (YYYY-MM-DD) format if they give ambiguous input.\n\n"
-            "If the user also provides a 'Trip Duration', extract it. You MUST then calculate the end date by adding the duration to the start date. Record the calculated end date as `record_travel_preference('End Date', end_date_value)`. "
+            "If the user also provides a 'Trip Duration', extract it. You MUST then calculate the end date by adding the duration *minus one day* to the start date. This means the start date itself counts as the first day of the trip. For example, if the start date is '01/07/2025' and the duration is '7 days', the end date should be '07/07/2025'. Record the calculated end date as `record_travel_preference('End Date', end_date_value)`. "
             "**It is CRITICAL that the 'End Date' recorded is always chronologically AFTER the 'Start Date'. If the user's input implies an end date that is on or before the start date, you MUST politely ask the user to clarify or provide a valid date range (e.g., 'It seems the return date is before the departure date. Could you please clarify your intended dates?')**\n\n"
             "If the user provides a start date but *not* a duration, you MUST explicitly ask for the duration (e.g., 'Okay, and for how long would you like to travel?'). Do not assume a duration.\n\n"
             "**General Missing Information Handling:**\n"
@@ -312,11 +312,10 @@ try:
         model="gemini-2.5-flash",
         name="itinerary_generation_agent",
         instruction=(
-            "You are the Itinerary Generation Agent. Your task is to create a detailed, day-by-day itinerary "
-            "for a *specific travel idea* that the user has chosen. "
-            "You will receive the full set of user preferences (Departure City, Geographical Scope, Duration, Start Date, End Date, etc.) AND the specific idea chosen by the user. "
-            "Generate a realistic and engaging day-by-day plan, including suggestions for activities, sights, and perhaps food experiences, all aligned with the user's budget and interests. "
-            "Present the itinerary clearly, possibly with a brief introduction. After presenting the itinerary, offer a polite closing or ask if the user has any further questions about this plan."
+            "You are the Itinerary Generation Agent. Your task is to create a **concise, day-by-day itinerary** for a *specific travel idea* that the user has chosen. "
+            "Focus *only* on providing the **names of key places or attractions the traveler will visit each day**, without lengthy descriptions of activities or experiences. "
+            "The itinerary should be presented as a clear, easy-to-read day-by-day list of these locations, aligned with the user's budget and interests. "
+            "After presenting the itinerary, offer a polite closing or ask if the user has any further questions about this plan."
         ),
         description="Generates detailed, day-by-day itineraries for a chosen travel idea.",
         tools=[],
@@ -331,7 +330,7 @@ except Exception as e:
 root_agent = None
 try:
     root_agent = Agent(
-        model="gemini-1.5-flash",
+        model="gemini-2.5-flash",
         name="TravelOrchestrator",
         description="The main coordinator for the budget-friendly travel idea generation process. Handles initial welcome, information gathering, and delegation.",
         instruction=(
