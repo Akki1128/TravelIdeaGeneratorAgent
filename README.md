@@ -32,7 +32,7 @@ This project demonstrates a multi-agent travel assistant built using the **Googl
 ```
 TravelIdeaGeneratorAgent/
 │
-├── multi_tool_agent/
+├── travel_agents/
 │   ├── agent.py              # Core agent logic and orchestration
 │   ├── .env.                 # Sample .env for API keys
 │   └── requirements.txt      # Python dependencies
