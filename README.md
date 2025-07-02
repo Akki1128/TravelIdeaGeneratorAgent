@@ -35,7 +35,7 @@ TravelIdeaGeneratorAgent/
 ├── travel_agents/
 │   ├── agent.py              # Core agent logic and orchestration
 │   ├── .env.                 # Sample .env for API keys
-│   └── requirements.txt      # Python dependencies
+└── requirements.txt          # Dependencies
 │
 └── README.md                 # This file
 ```
