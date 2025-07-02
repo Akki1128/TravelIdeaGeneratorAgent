@@ -84,7 +84,7 @@ The project requires access to:
 - **Amadeus API** (for flight data)
 
 #### Steps:
-1. Copy `.env.template` to `.env` inside `multi_tool_agent/`
+1. Copy `.env.template` to `.env` inside `travel_agents/`
 2. Add your API keys:
    ```dotenv
    GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
