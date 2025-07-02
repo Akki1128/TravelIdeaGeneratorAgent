@@ -30,7 +30,7 @@ This project demonstrates a multi-agent travel assistant built using the **Googl
 ### 📦 Folder Structure
 
 ```
-Google-ADK-Experiment/
+TravelIdeaGeneratorAgent/
 │
 ├── multi_tool_agent/
 │   ├── agent.py              # Core agent logic and orchestration
